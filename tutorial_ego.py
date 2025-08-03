@@ -4,6 +4,7 @@ import time
 import logging
 import pygame
 from pygame.locals import K_w, K_s, K_a, K_d, K_q, K_e, K_SPACE, K_ESCAPE
+import os
 
 # Initialize pygame for manual control
 pygame.init()
@@ -49,25 +50,33 @@ def update_spectator():
     spectator.set_transform(carla.Transform(spectator_location, spectator_rotation))
 
 # --------------
-# Spawn multiple attached cameras
+# Spawn multiple attached cameras and save poses
 # --------------
-def spawn_camera(bp_library, location, rotation, directory, converter=None):
+os.makedirs('tutorial/poses', exist_ok=True)
+
+def spawn_camera(bp_library, location, rotation, directory, name, converter=None):
     cam_bp = bp_library.find('sensor.camera.rgb')
     cam_bp.set_attribute("image_size_x", str(1920))
     cam_bp.set_attribute("image_size_y", str(1080))
     cam_bp.set_attribute("fov", str(105))
     transform = carla.Transform(location, rotation)
     camera = world.spawn_actor(cam_bp, transform, attach_to=ego_vehicle, attachment_type=carla.AttachmentType.Rigid)
-    if converter:
-        camera.listen(lambda image: image.save_to_disk(f'{directory}/%.6d.jpg' % image.frame, converter))
-    else:
-        camera.listen(lambda image: image.save_to_disk(f'{directory}/%.6d.jpg' % image.frame))
+
+    def save_image(image):
+        filename = f'{directory}/%.6d.jpg' % image.frame
+        image.save_to_disk(filename, converter) if converter else image.save_to_disk(filename)
+        cam_transform = camera.get_transform()
+        with open(f'tutorial/poses/{name}_poses.txt', 'a') as f:
+            f.write(f"{image.frame},{cam_transform.location.x},{cam_transform.location.y},{cam_transform.location.z},"
+                    f"{cam_transform.rotation.pitch},{cam_transform.rotation.yaw},{cam_transform.rotation.roll}\n")
+
+    camera.listen(save_image)
     return camera
 
-camera_front = spawn_camera(world.get_blueprint_library(), carla.Location(x=2.0, z=1.4), carla.Rotation(), 'tutorial/camera_front')
-camera_left = spawn_camera(world.get_blueprint_library(), carla.Location(x=0.0, y=-1.0, z=1.4), carla.Rotation(yaw=-90), 'tutorial/camera_left')
-camera_right = spawn_camera(world.get_blueprint_library(), carla.Location(x=0.0, y=1.0, z=1.4), carla.Rotation(yaw=90), 'tutorial/camera_right')
-camera_back = spawn_camera(world.get_blueprint_library(), carla.Location(x=-2.0, z=1.4), carla.Rotation(yaw=180), 'tutorial/camera_back')
+camera_front = spawn_camera(world.get_blueprint_library(), carla.Location(x=2.0, z=1.4), carla.Rotation(), 'tutorial/camera_front', 'front')
+camera_left = spawn_camera(world.get_blueprint_library(), carla.Location(x=0.0, y=-1.0, z=1.4), carla.Rotation(yaw=-90), 'tutorial/camera_left', 'left')
+camera_right = spawn_camera(world.get_blueprint_library(), carla.Location(x=0.0, y=1.0, z=1.4), carla.Rotation(yaw=90), 'tutorial/camera_right', 'right')
+camera_back = spawn_camera(world.get_blueprint_library(), carla.Location(x=-2.0, z=1.4), carla.Rotation(yaw=180), 'tutorial/camera_back', 'back')
 
 # Sensors: Collision, Lane Invasion, Obstacle
 col_bp = world.get_blueprint_library().find('sensor.other.collision')
@@ -117,21 +126,6 @@ sem_bp.set_attribute("fov", str(105))
 sem_transform = carla.Transform(carla.Location(x=2.0, z=1.4))
 sem_cam = world.spawn_actor(sem_bp, sem_transform, attach_to=ego_vehicle)
 sem_cam.listen(lambda image: image.save_to_disk('tutorial/semantic/%.6d.jpg' % image.frame, carla.ColorConverter.CityScapesPalette))
-
-# --------------
-# Add a new LIDAR sensor to my ego
-# --------------
-lidar_cam = None
-lidar_bp = world.get_blueprint_library().find('sensor.lidar.ray_cast')
-lidar_bp.set_attribute('channels',str(32))
-lidar_bp.set_attribute('points_per_second',str(90000))
-lidar_bp.set_attribute('rotation_frequency',str(40))
-lidar_bp.set_attribute('range',str(20))
-lidar_location = carla.Location(0,0,2)
-lidar_rotation = carla.Rotation(0,0,0)
-lidar_transform = carla.Transform(lidar_location,lidar_rotation)
-lidar_sen = world.spawn_actor(lidar_bp,lidar_transform,attach_to=ego_vehicle)
-lidar_sen.listen(lambda point_cloud: point_cloud.save_to_disk('tutorial/new_lidar_output/%.6d.ply' % point_cloud.frame))
 
 # Manual control loop
 control = carla.VehicleControl()
